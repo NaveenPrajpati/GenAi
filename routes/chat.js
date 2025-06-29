@@ -1,6 +1,9 @@
 // routes/chat.ts
 import express from "express";
 import { openai } from "../lib/openai.js";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
 
 const router = express.Router();
 
@@ -33,6 +36,39 @@ router.post("/chat", async (req, res) => {
   console.log(
     `⏱️ Latency: ${duration}ms, 🧠 Tokens (est.): ${Math.round(totalTokens)}`
   );
+});
+router.post("/test", async (req, res) => {
+  console.log(req.body);
+
+  const llm = new ChatOpenAI({
+    model: "gpt-4.1-nano",
+  });
+
+  //this language model approach to call llm
+
+  // const messages = [
+  //   new SystemMessage("Translate the following from English into hindi"),
+  //   new HumanMessage("hi!"),
+  // ];
+  // await llm.invoke(messages);
+
+  const systemTemplate = "Translate the following from English into {language}";
+
+  const promptTemplate = ChatPromptTemplate.fromMessages([
+    ["system", systemTemplate],
+    ["user", "{text}"],
+  ]);
+
+  const promptValue = await promptTemplate.invoke({
+    language: "hindi",
+    text: "hello",
+  });
+  console.log(promptValue.toChatMessages());
+  const response = await llm.invoke(promptValue);
+
+  console.log(response.content);
+
+  return res.json(response.content);
 });
 
 export default router;
