@@ -3,7 +3,7 @@ import express from "express";
 import { openai } from "../lib/openai.js";
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { ChatPromptTemplate, PromptTemplate } from "@langchain/core/prompts";
 
 const router = express.Router();
 
@@ -69,6 +69,34 @@ router.post("/test", async (req, res) => {
   console.log(response.content);
 
   return res.json(response.content);
+});
+router.post("/test-template", async (req, res) => {
+  console.log(req.body);
+  const llm = new ChatOpenAI({
+    model: "gpt-4.1-nano",
+  });
+
+  const text = " tell me a joke about {topic}";
+  //string prompt template
+  const promtTemplate = PromptTemplate.fromTemplate(text);
+  const temp1 = await promtTemplate.invoke({ topic: "mobile" });
+
+  console.log(temp1.toChatMessages());
+
+  //chat prompt template
+  const chatTemplate = ChatPromptTemplate.fromMessages([
+    ["system", "you are a helpful assistant"],
+    ["user", "tell me a joke about {topic}"],
+  ]);
+
+  const temp2 = await chatTemplate.invoke({ topic: "cats" });
+
+  console.log(temp2.toChatMessages());
+
+  const data1 = await llm.invoke(temp1);
+  const data2 = await llm.invoke(temp2);
+
+  return res.json({ temp1, temp2, data1, data2 });
 });
 
 export default router;
