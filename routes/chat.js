@@ -9,6 +9,7 @@ import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import { MongoDBAtlasVectorSearch } from "@langchain/mongodb";
 import { MongoClient } from "mongodb";
 import { config } from "dotenv";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 config();
 const loader = new PDFLoader("files/naveenResume.pdf");
 
@@ -52,6 +53,11 @@ router.post("/test", async (req, res) => {
     model: "gpt-4.1-nano",
   });
 
+  const llm2 = new ChatGoogleGenerativeAI({
+    model: "gemini-2.0-flash",
+    temperature: 0,
+  });
+
   //this language model approach to call llm
 
   // const messages = [
@@ -72,7 +78,7 @@ router.post("/test", async (req, res) => {
     text: "hello",
   });
   console.log(promptValue.toChatMessages());
-  const response = await llm.invoke(promptValue);
+  const response = await llm2.invoke(promptValue);
 
   console.log(response.content);
 
