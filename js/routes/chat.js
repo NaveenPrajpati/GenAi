@@ -1,6 +1,6 @@
 // routes/chat.ts
 import express from "express";
-import { openai } from "../lib/openai.js";
+import { openai } from "../js/lib/openai.js";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate, PromptTemplate } from "@langchain/core/prompts";

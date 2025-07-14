@@ -1,9 +1,9 @@
 // index.ts or app.ts
 import express from "express";
-import router from "./routes/chat.js";
+import router from "../routes/chat.js";
 import { config } from "dotenv";
-import langgraphRoutes from "./routes/agent.js";
-import searchRouter from "./routes/search.js";
+import langgraphRoutes from "../routes/agent.js";
+import searchRouter from "../routes/search.js";
 
 config();
 

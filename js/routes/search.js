@@ -4,7 +4,7 @@ import {
   getAnswer,
   healthCheck,
   searchSimilar,
-} from "../controllers/customSearch.js";
+} from "../js/controllers/customSearch.js";
 
 const searchRouter = Router();
 
