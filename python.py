@@ -1,6 +1,7 @@
 import getpass
 import os
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompts import PromptTemplate
 
 if not os.environ.get("OPENAI_API_KEY"):
   os.environ["OPENAI_API_KEY"] = getpass.getpass("Enter API key for OpenAI: ")
@@ -13,6 +14,7 @@ messages = [
     SystemMessage("Translate the following from English into Hindi"),
     HumanMessage("hi!"),
 ]
+
 
 response = model.invoke(messages)
 print(response.content)
