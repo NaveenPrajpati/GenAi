@@ -1,0 +1,14 @@
+--- Chunk 1 (0–2047 chars) ---
+Paul Graham starts by discussing the early focus of his work. He mentions that before college, he spent much of his time hacking Lisp and working on software that automated his needs. The main emphasis is on learning to program by solving real problems rather than through academic exercises.
+
+--- Chunk 2 (2048–4095 chars) ---
+In this chunk, Graham reflects on the importance of practical experience. He emphasizes that dealing with real-world constraints taught him more than structured courses. He shares anecdotes of how small projects like text editors and personal scripts shaped his coding style.
+
+--- Chunk 3 (4096–6143 chars) ---
+Graham then transitions to discuss collaboration. He notes that working with others—sharing ideas, dealing with code reviews, and handling disagreement—was instrumental in honing problem-solving skills and critical thinking.
+
+--- Chunk 4 (6144–8191 chars) ---
+This section dives into the importance of making things for people. Graham argues that the joy of creating software for an actual audience can’t be matched by theoretical problem-solving. He provides examples of small utilities gaining unexpected adoption.
+
+--- Chunk 5 (8192– end) ---
+Finally, he outlines some lessons learned: start early, build something people want, and iterate quickly. He ties back to his earlier experiences, reinforcing how each phase (alone, collaboration, shipping) built upon the former.
