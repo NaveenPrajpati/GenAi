@@ -22,8 +22,6 @@ import requests
 from bs4 import BeautifulSoup
 import tempfile
 import shutil
-from dotenv import load_dotenv
-load_dotenv()
 
 class StudyBuddy:
     def __init__(self, openai_api_key: str, persist_directory: str = "./chroma_db"):
@@ -32,8 +30,12 @@ class StudyBuddy:
         self.persist_directory = persist_directory
         
         # Initialize components
-        self.embeddings = OpenAIEmbeddings()
-        self.llm = ChatOpenAI()
+        self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        self.llm = ChatOpenAI(
+            temperature=0.7,
+            openai_api_key=openai_api_key,
+            model_name="gpt-3.5-turbo"
+        )
         
         # Text splitter for chunking documents
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -227,7 +229,7 @@ def main():
     st.set_page_config(
         page_title="Smart Study Buddy",
         page_icon="📚",
-        layout='wide'
+        layout="wide"
     )
     
     st.title("📚 Smart Study Buddy - Q&A Tutor")
@@ -235,23 +237,23 @@ def main():
     
     # Sidebar for configuration
     with st.sidebar:
-        st.header("My Sidebar")
-
-
-        # openai_key = st.text_input(
-        #     "OpenAI API Key",
-        #     type="password",
-        #     help="Enter your OpenAI API key to enable the chatbot"
-        # )
+        st.header("⚙️ Configuration")
         
-        # if not openai_key:
-        #     st.warning("Please enter your OpenAI API key to continue.")
-        #     return
+        # API Key input
+        openai_key = st.text_input(
+            "OpenAI API Key",
+            type="password",
+            help="Enter your OpenAI API key to enable the chatbot"
+        )
+        
+        if not openai_key:
+            st.warning("Please enter your OpenAI API key to continue.")
+            return
         
         # Initialize Study Buddy
         if 'study_buddy' not in st.session_state:
             with st.spinner("Initializing Study Buddy..."):
-                st.session_state.study_buddy = StudyBuddy('sdfdsf')
+                st.session_state.study_buddy = StudyBuddy(openai_key)
         
         buddy = st.session_state.study_buddy
         
