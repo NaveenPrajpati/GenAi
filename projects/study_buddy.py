@@ -262,29 +262,20 @@ def main():
     )
     
     st.title("📚 Smart Study Buddy - Q&A Tutor")
-    st.markdown("Ask questions about any topic! I'll search through ingested content to provide helpful answers.")
+    st.markdown("Ask questions about any Ingested topic! You will search through ingested content to provide helpful answers.")
     
-    # Sidebar for configuration
-    with st.sidebar:
-        st.header("⚙️ Configuration")
+ 
         
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if not openai_key:
-            st.error("OpenAI API key not found in environment variables.")
-            return
+    openai_key = os.getenv("OPENAI_API_KEY")
+    
+    # Initialize Study Buddy
+    if 'study_buddy' not in st.session_state:
+        with st.spinner("Initializing Study Buddy..."):
+            st.session_state.study_buddy = StudyBuddy(openai_key)
+    
+    buddy = st.session_state.study_buddy
         
-        # Initialize Study Buddy
-        if 'study_buddy' not in st.session_state:
-            with st.spinner("Initializing Study Buddy..."):
-                st.session_state.study_buddy = StudyBuddy(openai_key)
-        
-        buddy = st.session_state.study_buddy
-        
-        # Collection info
-        st.header("📊 Knowledge Base Status")
-        info = buddy.get_collection_info()
-        st.metric("Documents", info["document_count"])
-        st.info(f"Status: {info['status']}")
+    
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -293,7 +284,7 @@ def main():
         st.header("📖 Content Ingestion")
         
         # Wikipedia content ingestion
-        st.subheader("Wikipedia Topics")
+        st.subheader("Ingest any Wikipedia Topics")
         wikipedia_topics = st.text_area(
             "Enter Wikipedia topics (one per line):",
             placeholder="Black holes\nWorld War II\nQuantum physics\nMachine learning",
@@ -308,7 +299,7 @@ def main():
         custom_title = st.text_input("Content Title:", placeholder="My Study Notes")
         custom_content = st.text_area(
             "Content Text:",
-            placeholder="Enter your custom study material here...",
+            placeholder="Enter your content here...",
             height=150
         )
         
@@ -344,13 +335,13 @@ def main():
                 st.write(response["answer"])
                 
                 # Display sources
-                if response["sources"]:
-                    st.subheader("📚 Sources")
-                    for i, source in enumerate(response["sources"], 1):
-                        with st.expander(f"Source {i}: {source['metadata'].get('title', 'Unknown')}"):
-                            st.write(f"**Type:** {source['metadata'].get('type', 'Unknown')}")
-                            st.write(f"**Source:** {source['metadata'].get('source', 'Unknown')}")
-                            st.write(f"**Preview:** {source['content']}")
+                # if response["sources"]:
+                #     st.subheader("📚 Sources")
+                #     for i, source in enumerate(response["sources"], 1):
+                #         with st.expander(f"Source {i}: {source['metadata'].get('title', 'Unknown')}"):
+                #             st.write(f"**Type:** {source['metadata'].get('type', 'Unknown')}")
+                #             st.write(f"**Source:** {source['metadata'].get('source', 'Unknown')}")
+                #             st.write(f"**Preview:** {source['content']}")
             else:
                 st.warning("Please enter a question.")
         
