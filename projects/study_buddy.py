@@ -22,10 +22,19 @@ import requests
 from bs4 import BeautifulSoup
 import tempfile
 import shutil
+from dotenv import load_dotenv
+load_dotenv()
 
 class StudyBuddy:
+    """
+    Core class to handle content ingestion, embedding, vector storage,
+    and retrieval-augmented question answering using OpenAI and Chroma.
+    """
+
     def __init__(self, openai_api_key: str, persist_directory: str = "./chroma_db"):
-        """Initialize the Study Buddy with OpenAI API key and vector store."""
+        """
+        Initialize embeddings, LLM, text splitter, Wikipedia, vectorstore and QA chain.
+        """
         self.openai_api_key = openai_api_key
         self.persist_directory = persist_directory
         
@@ -76,7 +85,10 @@ class StudyBuddy:
             st.error(f"Error initializing vector store: {e}")
     
     def _create_qa_chain(self):
-        """Create the RetrievalQA chain with custom prompt."""
+        """
+        Construct a RetrievalQA chain that uses the Chroma retriever
+        and a custom prompt to answer user questions based on ingested context.
+        """
         # Custom prompt template
         prompt_template = """You are a helpful study buddy and tutor. Use the following context to answer the question in a clear, educational manner. 
 
@@ -180,7 +192,9 @@ Answer: """
             return False
     
     def ask_question(self, question: str) -> Dict[str, Any]:
-        """Ask a question and get an answer with sources."""
+        """
+        Executes the RetrievalQA chain on a user query and returns the answer and document sources.
+        """
         try:
             if not self.qa_chain:
                 return {
@@ -210,7 +224,9 @@ Answer: """
             }
     
     def get_collection_info(self) -> Dict[str, Any]:
-        """Get information about the current knowledge base."""
+        """
+        Returns metadata about the current Chroma collection, like document count and readiness status.
+        """
         try:
             collection = self.vectorstore._collection
             count = collection.count()
@@ -223,6 +239,22 @@ Answer: """
                 "document_count": 0,
                 "status": "Not initialized"
             }
+
+def handle_wikipedia_ingestion(buddy: StudyBuddy, wikipedia_topics: str):
+    """Handles ingestion of multiple Wikipedia topics."""
+    if wikipedia_topics:
+        topics = [topic.strip() for topic in wikipedia_topics.split('\n') if topic.strip()]
+        with st.spinner(f"Ingesting {len(topics)} topics from Wikipedia..."):
+            result = buddy.ingest_wikipedia_content(topics)
+
+        if result["ingested"]:
+            st.success(f"✅ Successfully ingested: {', '.join(result['ingested'])}")
+            st.info(f"Created {result['total_chunks']} text chunks")
+
+        if result["failed"]:
+            st.warning(f"⚠️ Failed to ingest: {', '.join(result['failed'])}")
+    else:
+        st.warning("Please enter at least one topic.")
 
 # Streamlit UI
 def main():
@@ -239,15 +271,9 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # API Key input
-        openai_key = st.text_input(
-            "OpenAI API Key",
-            type="password",
-            help="Enter your OpenAI API key to enable the chatbot"
-        )
-        
+        openai_key = os.getenv("OPENAI_API_KEY")
         if not openai_key:
-            st.warning("Please enter your OpenAI API key to continue.")
+            st.error("OpenAI API key not found in environment variables.")
             return
         
         # Initialize Study Buddy
@@ -278,19 +304,7 @@ def main():
         )
         
         if st.button("📥 Ingest Wikipedia Content"):
-            if wikipedia_topics:
-                topics = [topic.strip() for topic in wikipedia_topics.split('\n') if topic.strip()]
-                with st.spinner(f"Ingesting {len(topics)} topics from Wikipedia..."):
-                    result = buddy.ingest_wikipedia_content(topics)
-                
-                if result["ingested"]:
-                    st.success(f"✅ Successfully ingested: {', '.join(result['ingested'])}")
-                    st.info(f"Created {result['total_chunks']} text chunks")
-                
-                if result["failed"]:
-                    st.warning(f"⚠️ Failed to ingest: {', '.join(result['failed'])}")
-            else:
-                st.warning("Please enter at least one topic.")
+            handle_wikipedia_ingestion(buddy, wikipedia_topics)
         
         # Custom text ingestion
         st.subheader("Custom Text Content")
