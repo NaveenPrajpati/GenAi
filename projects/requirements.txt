@@ -20,6 +20,7 @@ dataclasses-json==0.6.7
 ddgs==9.4.0
 defusedxml==0.7.1
 distro==1.9.0
+dnspython==2.7.0
 dotenv==0.9.9
 duckduckgo_search==8.1.1
 durationpy==0.10
@@ -64,9 +65,11 @@ langchain-community==0.3.27
 langchain-core==0.3.68
 langchain-experimental==0.3.4
 langchain-google-genai==2.1.8
+langchain-mongodb==0.6.2
 langchain-openai==0.3.28
 langchain-text-splitters==0.3.8
 langsmith==0.4.5
+lark==1.2.2
 lxml==6.0.0
 markdown-it-py==3.0.0
 MarkupSafe==3.0.2
@@ -106,6 +109,7 @@ pydantic-settings==2.10.1
 pydantic_core==2.33.2
 pydeck==0.9.1
 Pygments==2.19.2
+pymongo==4.13.2
 pyparsing==3.2.3
 PyPika==0.48.9
 pyproject_hooks==1.2.0
