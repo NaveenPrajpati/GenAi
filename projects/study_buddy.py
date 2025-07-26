@@ -12,17 +12,10 @@ from typing import List, Dict, Any
 import wikipediaapi
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain.vectorstores import Chroma
 from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
 from langchain.schema import Document
 from langchain.prompts import PromptTemplate
-import chromadb
-from chromadb.config import Settings
-import requests
-from bs4 import BeautifulSoup
-import tempfile
-import shutil
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from dotenv import load_dotenv
 load_dotenv()
