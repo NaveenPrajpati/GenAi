@@ -259,6 +259,7 @@ def main():
         page_title="Smart Study Buddy",
         page_icon="📚",
         layout="wide"
+        
     )
     
     st.title("📚 Smart Study Buddy - Q&A Tutor")
