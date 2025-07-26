@@ -6,11 +6,12 @@ about various topics using Wikipedia and other content sources.
 """
 
 import os
+from pymongo import MongoClient
 import streamlit as st
 from typing import List, Dict, Any
 import wikipediaapi
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
@@ -22,6 +23,7 @@ import requests
 from bs4 import BeautifulSoup
 import tempfile
 import shutil
+from langchain_mongodb import MongoDBAtlasVectorSearch
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -69,14 +71,16 @@ class StudyBuddy:
     def _initialize_vectorstore(self):
         """Initialize the Chroma vector store."""
         try:
-            # Create directory if it doesn't exist
-            os.makedirs(self.persist_directory, exist_ok=True)
-            
+            client = MongoClient(os.environ['MONGO_URI'])
+            database = client["genai"]
+            collection = database["buddy"]
             # Initialize Chroma with persistence
-            self.vectorstore = Chroma(
-                persist_directory=self.persist_directory,
-                embedding_function=self.embeddings
-            )
+            self.vectorstore = MongoDBAtlasVectorSearch(
+    embedding=self.embeddings,
+    collection=collection,
+    index_name='vector_index',
+    relevance_score_fn="cosine",
+)
             
             # Create QA chain
             self._create_qa_chain()
@@ -151,8 +155,8 @@ Answer: """
             chunks = self.text_splitter.split_documents(documents)
             
             # Add to vector store
-            self.vectorstore.add_documents(chunks)
-            self.vectorstore.persist()
+            ids = [f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)]
+            self.vectorstore.add_documents(chunks, ids=ids)
             
             # Recreate QA chain with updated vectorstore
             self._create_qa_chain()
@@ -179,8 +183,8 @@ Answer: """
             chunks = self.text_splitter.split_documents([doc])
             
             # Add to vector store
-            self.vectorstore.add_documents(chunks)
-            self.vectorstore.persist()
+            ids = [f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)]
+            self.vectorstore.add_documents(chunks, ids=ids)
             
             # Recreate QA chain
             self._create_qa_chain()
