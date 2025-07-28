@@ -12,18 +12,12 @@ from langchain_text_splitters import CharacterTextSplitter
 
 import numpy as np
 from dotenv import load_dotenv
+from tqdm.auto import tqdm
 
 load_dotenv()
 
 class BookRecommenderSystem:
-    def __init__(self):
-        """
-        Initialize the Book Recommender System with LangChain components
-        
-        Args:
-            openai_api_key: OpenAI API key for embeddings and LLM
-        """
-        
+    def __init__(self):   
         # Initialize LangChain components
         self.embeddings = OpenAIEmbeddings()
         self.llm = ChatOpenAI(temperature=0.7, max_tokens=500)
@@ -66,38 +60,40 @@ class BookRecommenderSystem:
         self.books_data = books_data
         
         # Create documents for vector storage
-        raw_documents = []
+        texts = []
+        metadatas = []
         for book in books_data:
-            # Combine book information into a searchable text
-            content = f"""
-            Title: {book.get('title', '')}
-            Author: {book.get('author', '')}
-            Genre: {book.get('genre', '')}
-            Description: {book.get('description', '')}
-            Rating: {book.get('rating', 'N/A')}
-            Year: {book.get('year', 'N/A')}
-            """
-            
-            doc = Document(
-                page_content=content.strip(),
-                metadata={
-                    "title": book.get('title', ''),
-                    "author": book.get('author', ''),
-                    "genre": book.get('genre', ''),
-                    "rating": book.get('rating', 0),
-                    "year": book.get('year', 0)
-                }
+            content = (
+                f"Title: {book['title']}\n"
+                f"Author: {book['author']}\n"
+                f"Genre: {book['genre']}\n"
+                f"Description: {book['description']}\n"
+                f"Rating: {book.get('rating', 'N/A')}\n"
+                f"Year: {book.get('year', 'N/A')}\n"
             )
-            raw_documents.append(doc)
-        
-        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-        documents = text_splitter.split_documents(raw_documents)
+            texts.append(content)
+            metadatas.append({
+                "title": book['title'],
+                "author": book['author'],
+                "genre": book['genre'],
+                "rating": book.get('rating', 0),
+                "year": book.get('year', 0)
+            })
 
-        # Create vector store
-        self.vectorstore = FAISS.from_documents(documents, self.embeddings)
-        print(f"Loaded {len(books_data)} books into the recommendation system")
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        docs = text_splitter.create_documents(texts=texts, metadatas=metadatas)
+
+        # Incrementally add with progress
+        self.vectorstore = None
+        for doc in tqdm(docs, desc="Ingesting chunks into FAISS"):
+            if self.vectorstore:
+                self.vectorstore.add_documents([doc])
+            else:
+                self.vectorstore = FAISS.from_documents([doc], self.embeddings)
+
+        print(f"Indexed {len(docs)} chunks from {len(books_data)} books.")
     
-    def find_similar_books(self, query: str, k: int = 10) -> List[Document]:
+    def find_similar_books(self, query: str, k: int = 10,genre_filter: str = None) -> List[Document]:
         """
         Find similar books based on a query using vector similarity
         
@@ -110,9 +106,10 @@ class BookRecommenderSystem:
         """
         if not self.vectorstore:
             raise ValueError("No books data loaded. Please call load_books_data() first.")
-        
-        similar_docs = self.vectorstore.similarity_search(query, k=k)
-        return similar_docs
+        kwargs = {}
+        if genre_filter:
+            kwargs['filter'] = {"genre": genre_filter}
+        return self.vectorstore.similarity_search(query, k=k, **kwargs)
     
     def get_recommendations(self, user_preferences: str, context: str = "") -> str:
         """
@@ -269,7 +266,8 @@ def demo_recommender_system():
     recommender.load_books_data(books_data)
     
     print("1. Basic Search:")
-    search_results = recommender.search_books("science fiction")
+    ss=input("Search book here - ")
+    search_results = recommender.search_books(ss)
     for book in search_results:
         print(f"- {book['title']} by {book['author']}")
     
