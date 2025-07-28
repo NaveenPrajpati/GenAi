@@ -17,7 +17,9 @@ from langchain.chains import RetrievalQA
 from langchain.schema import Document
 from langchain.prompts import PromptTemplate
 from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_community.document_loaders import PyPDFLoader
 from dotenv import load_dotenv
+import tempfile
 load_dotenv()
 
 class StudyBuddy:
@@ -303,7 +305,26 @@ def main():
             placeholder="Enter your content here...",
             height=150
         )
-        
+        picked_file=st.file_uploader(label="Upload pdf file", type=['pdf'], accept_multiple_files=False, key=None, help="Upload a pdf file to ingest",)
+        if picked_file is not None:
+            st.text('file loaded')
+            with st.spinner("Ingesting pdf content..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(picked_file.read())
+                    tmp_file_path = tmp_file.name
+                loader=PyPDFLoader(tmp_file_path)
+                doc=loader.load()
+                content='\n'.join([page.page_content for page in doc])
+                success = buddy.ingest_text_content(picked_file.name, content,source_type='pdf')
+                
+            if success:
+                   st.success("✅ pdf content ingested successfully!")
+            else:
+              st.error("❌ Failed to ingest file data")
+            
+            
+
+
         if st.button("📥 Ingest Custom Content"):
             if custom_title and custom_content:
                 with st.spinner("Ingesting custom content..."):
