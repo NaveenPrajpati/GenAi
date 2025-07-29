@@ -20,7 +20,9 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_community.document_loaders import PyPDFLoader
 from dotenv import load_dotenv
 import tempfile
+
 load_dotenv()
+
 
 class StudyBuddy:
     """
@@ -34,55 +36,53 @@ class StudyBuddy:
         """
         self.openai_api_key = openai_api_key
         self.persist_directory = persist_directory
-        
+
         # Initialize components
         self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
         self.llm = ChatOpenAI(
-            temperature=0.7,
-            openai_api_key=openai_api_key,
-            model_name="gpt-3.5-turbo"
+            temperature=0.7, openai_api_key=openai_api_key, model_name="gpt-3.5-turbo"
         )
-        
+
         # Text splitter for chunking documents
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len,
-            separators=["\n\n", "\n", " ", ""]
+            separators=["\n\n", "\n", " ", ""],
         )
-        
+
         # Initialize Wikipedia API
         self.wiki = wikipediaapi.Wikipedia(
-            language='en',
+            language="en",
             extract_format=wikipediaapi.ExtractFormat.WIKI,
-            user_agent='StudyBuddy/1.0 (https://example.com)'
+            user_agent="StudyBuddy/1.0 (https://example.com)",
         )
-        
+
         # Initialize or load vector store
         self.vectorstore = None
         self.qa_chain = None
         self._initialize_vectorstore()
-    
+
     def _initialize_vectorstore(self):
         """Initialize the Chroma vector store."""
         try:
-            client = MongoClient(os.environ['MONGO_URI'])
+            client = MongoClient(os.environ["MONGO_URI"])
             database = client["genai"]
             collection = database["buddy"]
             # Initialize Chroma with persistence
             self.vectorstore = MongoDBAtlasVectorSearch(
-    embedding=self.embeddings,
-    collection=collection,
-    index_name='vector_index',
-    relevance_score_fn="cosine",
-)
-            
+                embedding=self.embeddings,
+                collection=collection,
+                index_name="vector_index",
+                relevance_score_fn="cosine",
+            )
+
             # Create QA chain
             self._create_qa_chain()
-            
+
         except Exception as e:
             st.error(f"Error initializing vector store: {e}")
-    
+
     def _create_qa_chain(self):
         """
         Construct a RetrievalQA chain that uses the Chroma retriever
@@ -98,34 +98,30 @@ Context: {context}
 Question: {question}
 
 Answer: """
-        
-        PROMPT = PromptTemplate(
-            template=prompt_template,
-            input_variables=["context", "question"]
-        )
-        
+
+        PROMPT = PromptTemplate.from_template(prompt_template)
+
         self.qa_chain = RetrievalQA.from_chain_type(
             llm=self.llm,
             chain_type="stuff",
             retriever=self.vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 3}
+                search_type="similarity", search_kwargs={"k": 3}
             ),
             chain_type_kwargs={"prompt": PROMPT},
-            return_source_documents=True
+            return_source_documents=True,
         )
-    
+
     def ingest_wikipedia_content(self, topics: List[str]) -> Dict[str, Any]:
         """Ingest content from Wikipedia for given topics."""
         documents = []
         ingested_topics = []
         failed_topics = []
-        
+
         for topic in topics:
             try:
                 # Get Wikipedia page
                 page = self.wiki.page(topic)
-                
+
                 if page.exists():
                     # Create document
                     doc = Document(
@@ -134,35 +130,39 @@ Answer: """
                             "source": f"Wikipedia: {page.title}",
                             "title": page.title,
                             "url": page.fullurl,
-                            "type": "wikipedia"
-                        }
+                            "type": "wikipedia",
+                        },
                     )
                     documents.append(doc)
                     ingested_topics.append(topic)
                 else:
                     failed_topics.append(f"{topic} (page not found)")
-                    
+
             except Exception as e:
                 failed_topics.append(f"{topic} (error: {str(e)})")
-        
+
         # Split documents into chunks
         if documents:
             chunks = self.text_splitter.split_documents(documents)
-            
+
             # Add to vector store
-            ids = [f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)]
+            ids = [
+                f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)
+            ]
             self.vectorstore.add_documents(chunks, ids=ids)
-            
+
             # Recreate QA chain with updated vectorstore
             self._create_qa_chain()
-        
+
         return {
             "ingested": ingested_topics,
             "failed": failed_topics,
-            "total_chunks": len(chunks) if documents else 0
+            "total_chunks": len(chunks) if documents else 0,
         }
-    
-    def ingest_text_content(self, title: str, content: str, source_type: str = "custom") -> bool:
+
+    def ingest_text_content(
+        self, title: str, content: str, source_type: str = "custom"
+    ) -> bool:
         """Ingest custom text content."""
         try:
             doc = Document(
@@ -170,26 +170,28 @@ Answer: """
                 metadata={
                     "source": f"{source_type}: {title}",
                     "title": title,
-                    "type": source_type
-                }
+                    "type": source_type,
+                },
             )
-            
+
             # Split into chunks
             chunks = self.text_splitter.split_documents([doc])
-            
+
             # Add to vector store
-            ids = [f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)]
+            ids = [
+                f"doc_{i}_{hash(chunk.page_content)}" for i, chunk in enumerate(chunks)
+            ]
             self.vectorstore.add_documents(chunks, ids=ids)
-            
+
             # Recreate QA chain
             self._create_qa_chain()
-            
+
             return True
-            
+
         except Exception as e:
             st.error(f"Error ingesting text content: {e}")
             return False
-    
+
     def ask_question(self, question: str) -> Dict[str, Any]:
         """
         Executes the RetrievalQA chain on a user query and returns the answer and document sources.
@@ -198,30 +200,26 @@ Answer: """
             if not self.qa_chain:
                 return {
                     "answer": "Please ingest some content first before asking questions.",
-                    "sources": []
+                    "sources": [],
                 }
-            
+
             result = self.qa_chain({"query": question})
-            
+
             # Extract source information
             sources = []
             for doc in result.get("source_documents", []):
-                sources.append({
-                    "content": doc.page_content[:200] + "...",
-                    "metadata": doc.metadata
-                })
-            
-            return {
-                "answer": result["result"],
-                "sources": sources
-            }
-            
+                sources.append(
+                    {
+                        "content": doc.page_content[:200] + "...",
+                        "metadata": doc.metadata,
+                    }
+                )
+
+            return {"answer": result["result"], "sources": sources}
+
         except Exception as e:
-            return {
-                "answer": f"Error processing question: {str(e)}",
-                "sources": []
-            }
-    
+            return {"answer": f"Error processing question: {str(e)}", "sources": []}
+
     def get_collection_info(self) -> Dict[str, Any]:
         """
         Returns metadata about the current Chroma collection, like document count and readiness status.
@@ -231,18 +229,18 @@ Answer: """
             count = collection.count()
             return {
                 "document_count": count,
-                "status": "Ready" if count > 0 else "Empty"
+                "status": "Ready" if count > 0 else "Empty",
             }
         except:
-            return {
-                "document_count": 0,
-                "status": "Not initialized"
-            }
+            return {"document_count": 0, "status": "Not initialized"}
+
 
 def handle_wikipedia_ingestion(buddy: StudyBuddy, wikipedia_topics: str):
     """Handles ingestion of multiple Wikipedia topics."""
     if wikipedia_topics:
-        topics = [topic.strip() for topic in wikipedia_topics.split('\n') if topic.strip()]
+        topics = [
+            topic.strip() for topic in wikipedia_topics.split("\n") if topic.strip()
+        ]
         with st.spinner(f"Ingesting {len(topics)} topics from Wikipedia..."):
             result = buddy.ingest_wikipedia_content(topics)
 
@@ -255,107 +253,106 @@ def handle_wikipedia_ingestion(buddy: StudyBuddy, wikipedia_topics: str):
     else:
         st.warning("Please enter at least one topic.")
 
+
 # Streamlit UI
 def main():
-    st.set_page_config(
-        page_title="Smart Study Buddy",
-        page_icon="📚",
-        layout="wide"
-        
-    )
-    
+    st.set_page_config(page_title="Smart Study Buddy", page_icon="📚", layout="wide")
+
     st.title("📚 Smart Study Buddy - Q&A Tutor")
-    st.markdown("Ask questions about any Ingested topic! You will search through ingested content to provide helpful answers.")
-    
- 
-        
+    st.markdown(
+        "Ask questions about any Ingested topic! You will search through ingested content to provide helpful answers."
+    )
+
     openai_key = os.getenv("OPENAI_API_KEY")
-    
+
     # Initialize Study Buddy
-    if 'study_buddy' not in st.session_state:
+    if "study_buddy" not in st.session_state:
         with st.spinner("Initializing Study Buddy..."):
             st.session_state.study_buddy = StudyBuddy(openai_key)
-    
+
     buddy = st.session_state.study_buddy
-        
-    
-    
+
     # Main content area
     col1, col2 = st.columns([1, 1])
-    
+
     with col1:
         st.header("📖 Content Ingestion")
-        
+
         # Wikipedia content ingestion
         st.subheader("Ingest any Wikipedia Topics")
         wikipedia_topics = st.text_area(
             "Enter Wikipedia topics (one per line):",
             placeholder="Black holes\nWorld War II\nQuantum physics\nMachine learning",
-            height=100
+            height=100,
         )
-        
+
         if st.button("📥 Ingest Wikipedia Content"):
             handle_wikipedia_ingestion(buddy, wikipedia_topics)
-        
+
         # Custom text ingestion
         st.subheader("Custom Text Content")
         custom_title = st.text_input("Content Title:", placeholder="My Study Notes")
         custom_content = st.text_area(
-            "Content Text:",
-            placeholder="Enter your content here...",
-            height=150
+            "Content Text:", placeholder="Enter your content here...", height=150
         )
-        picked_file=st.file_uploader(label="Upload pdf file", type=['pdf'], accept_multiple_files=False, key=None, help="Upload a pdf file to ingest",)
+        picked_file = st.file_uploader(
+            label="Upload pdf file",
+            type=["pdf"],
+            accept_multiple_files=False,
+            key=None,
+            help="Upload a pdf file to ingest",
+        )
         if picked_file is not None:
-            st.text('file loaded')
+            st.text("file loaded")
             with st.spinner("Ingesting pdf content..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".pdf"
+                ) as tmp_file:
                     tmp_file.write(picked_file.read())
                     tmp_file_path = tmp_file.name
-                loader=PyPDFLoader(tmp_file_path)
-                doc=loader.load()
-                content='\n'.join([page.page_content for page in doc])
-                success = buddy.ingest_text_content(picked_file.name, content,source_type='pdf')
-                
-            if success:
-                   st.success("✅ pdf content ingested successfully!")
-            else:
-              st.error("❌ Failed to ingest file data")
-            
-            
+                loader = PyPDFLoader(tmp_file_path)
+                doc = loader.load()
+                content = "\n".join([page.page_content for page in doc])
+                success = buddy.ingest_text_content(
+                    picked_file.name, content, source_type="pdf"
+                )
 
+            if success:
+                st.success("✅ pdf content ingested successfully!")
+            else:
+                st.error("❌ Failed to ingest file data")
 
         if st.button("📥 Ingest Custom Content"):
             if custom_title and custom_content:
                 with st.spinner("Ingesting custom content..."):
                     success = buddy.ingest_text_content(custom_title, custom_content)
-                
+
                 if success:
                     st.success("✅ Custom content ingested successfully!")
                 else:
                     st.error("❌ Failed to ingest custom content.")
             else:
                 st.warning("Please provide both title and content.")
-    
+
     with col2:
         st.header("💬 Ask Questions")
-        
+
         # Question input
         question = st.text_input(
             "Your Question:",
             placeholder="What are black holes? How did World War II start?",
-            key="question_input"
+            key="question_input",
         )
-        
+
         if st.button("🔍 Ask Question", type="primary"):
             if question:
                 with st.spinner("Thinking..."):
                     response = buddy.ask_question(question)
-                
+
                 # Display answer
                 st.subheader("📝 Answer")
                 st.write(response["answer"])
-                
+
                 # Display sources
                 # if response["sources"]:
                 #     st.subheader("📚 Sources")
@@ -366,11 +363,11 @@ def main():
                 #             st.write(f"**Preview:** {source['content']}")
             else:
                 st.warning("Please enter a question.")
-        
+
         # Chat history
-        if 'chat_history' not in st.session_state:
+        if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
-        
+
         # Display recent questions
         if st.session_state.chat_history:
             st.subheader("🕒 Recent Questions")
@@ -378,9 +375,11 @@ def main():
                 with st.expander(f"Q: {q[:50]}..."):
                     st.write(f"**Answer:** {a[:200]}...")
 
+
 # Instructions for setup
 def show_setup_instructions():
-    st.markdown("""
+    st.markdown(
+        """
     ## 🚀 Setup Instructions
     
     ### Prerequisites
@@ -408,7 +407,9 @@ def show_setup_instructions():
     - Ask specific questions for better answers
     - Use the sources to verify and learn more
     - Add your own notes and study materials for personalized learning
-    """)
+    """
+    )
+
 
 if __name__ == "__main__":
     main()
