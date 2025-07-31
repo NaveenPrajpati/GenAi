@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-llm=ChatOpenAI()
-loader =PyPDFLoader('path to pdf file.pdf')
-doc=loader.load()
+llm = ChatOpenAI()
+loader = PyPDFLoader("absolute path to pdf file.pdf")
+doc = loader.load()
 # print(doc)
 print(doc[0].page_content)
 print(doc[0].metadata)
