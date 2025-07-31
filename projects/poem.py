@@ -1,6 +1,6 @@
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import PromptTemplate, FewShotPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain.prompts import PromptTemplate, FewShotPromptTemplate
+from langchain.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 import os
 
@@ -30,9 +30,8 @@ examples = [
 ]
 
 # Create the example template
-example_template = PromptTemplate(
-    input_variables=["topic", "mood", "poem"],
-    template="Topic: {topic}\nMood: {mood}\nPoem:\n{poem}",
+example_template = PromptTemplate.from_template(
+    "Topic: {topic}\nMood: {mood}\nPoem:\n{poem}",
 )
 
 # Create the few-shot prompt template
@@ -184,11 +183,7 @@ class AdvancedPoemGenerator:
 
 # Example usage of advanced generator
 def demo_advanced_generator():
-    """Demonstrate the advanced poem generator"""
     generator = AdvancedPoemGenerator()
-
-    print("\n🌟 Advanced Poem Generator Demo")
-    print("=" * 50)
 
     styles = ["haiku", "free_verse", "limerick"]
     topic = "coffee shop"
