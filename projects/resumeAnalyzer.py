@@ -4,27 +4,18 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
+import streamlit as st
 from dotenv import load_dotenv
-
+import tempfile
+import json
 
 load_dotenv()
 
-# Determine absolute path to the PDF
 script_dir = os.path.dirname(os.path.realpath(__file__))
 file_path = os.path.join(script_dir, "resume.pdf")
-# Verify existence
 
+st.header("Welcome to resume analyzer")
 
-try:
-    # Load all pages from the PDF
-    loader = PyPDFLoader(file_path)
-    docs = loader.load()
-    print(f"Loaded {len(docs)} pages from resume.")
-    # Combine all page contents into one string
-    resume_text = "\n".join(doc.page_content for doc in docs)
-except Exception as e:
-    print("error in loading")
-    sys.exit(1)
 
 # text_splitter = SemanticChunker(embedder=OpenAIEmbeddings())
 # chunks = text_splitter.split_documents(docs)
@@ -88,8 +79,8 @@ infoSchema = {
 
 
 llm = ChatOpenAI(model="gpt-4o-mini")
-chain = prompt | llm.with_structured_output(infoSchema)
-basic_info = chain.invoke({"data": resume_text})
+# chain = prompt | llm.with_structured_output(infoSchema)
+# basic_info = chain.invoke({"data": resume_text})
 formatPrompt = PromptTemplate.from_template(
     """
 You are a resume formatting expert.
@@ -154,5 +145,32 @@ Return a JSON with:
 )
 
 chain1 = atsPrompt | llm
-ats_feedback = chain1.invoke({"resume_text": resume_text})
-print(ats_feedback.content)
+
+
+file = st.file_uploader(
+    label="Select your pdf resume",
+    type=["pdf"],
+    accept_multiple_files=False,
+)
+if file is not None:
+    st.text("file loaded")
+    with st.spinner("Reading pdf content..."):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_file.write(file.read())
+            tmp_file_path = tmp_file.name
+        loader = PyPDFLoader(tmp_file_path)
+        doc = loader.load()
+        st.text(f"Loaded {len(doc)} pages from resume.")
+        resume_text = "\n".join([page.page_content for page in doc])
+
+    if resume_text:
+        st.success("Resume loaded successfully!")
+        ats_feedback = chain1.invoke({"resume_text": resume_text})
+        st.subheader("ATS Feedback")
+        try:
+            feedback_json = json.loads(ats_feedback.content)
+            st.json(feedback_json)
+        except Exception:
+            st.text(ats_feedback.content)
+    else:
+        st.error("❌ Failed to load")
