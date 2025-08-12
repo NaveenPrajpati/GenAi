@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, START, END
-from typing_extensions import TypedDict, Annotated
+from typing_extensions import TypedDict
+from typing import Annotated
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
