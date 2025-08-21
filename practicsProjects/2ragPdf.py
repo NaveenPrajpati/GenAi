@@ -1,260 +1,243 @@
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma, FAISS
+from __future__ import annotations
+
 import os
-from langchain.chains import RetrievalQA
-from langchain.llms import Ollama  # or OpenAI, etc.
-from langchain.prompts import PromptTemplate
-from langchain.text_splitter import CharacterTextSplitter
+from typing import List, Dict, Any, Tuple
+
+# Loaders / docs
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+)  # or PyPDFium2Loader / PyMuPDFLoader
+from langchain_core.documents import Document
+
+# Splitters
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# Embeddings (choose ONE of these)
+# from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+
+# Vector stores
+from langchain_chroma import Chroma
+from langchain_community.vectorstores.faiss import FAISS
+
+# LLM + prompts + runnables
 from langchain_openai import ChatOpenAI
+from langchain import hub
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+EMBEDDING_BACKEND = "hf"  # "hf" or "openai"
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
+PERSIST_DIR = "./chroma_db"
+COLLECTION_NAME = "pdf_rag"
 
 
-def load_pdfs(pdf_paths):
-    """Load and process PDF documents"""
-    documents = []
-
-    for pdf_path in pdf_paths:
-        loader = PyPDFLoader(pdf_path)
-        docs = loader.load()
-
-        # Add source metadata
-        for doc in docs:
-            doc.metadata["source_file"] = os.path.basename(pdf_path)
-            doc.metadata["page"] = doc.metadata.get("page", 0) + 1  # 1-indexed
-
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+def load_pdfs(pdf_paths: List[str]) -> List[Document]:
+    """Load and annotate PDFs (1-index page numbers)."""
+    documents: List[Document] = []
+    for path in pdf_paths:
+        loader = PyPDFLoader(path)
+        docs = loader.load()  # returns List[Document]
+        print("document -", len(docs))
+        for d in docs:
+            d.metadata.setdefault("source_file", os.path.basename(path))
+            # PyPDFLoader uses 0-indexed page in metadata; normalize to 1-index for display
+            if "page" in d.metadata:
+                d.metadata["page"] = int(d.metadata["page"]) + 1
         documents.extend(docs)
-
     return documents
 
 
-def chunk_strategy_1(documents, chunk_size=1000, chunk_overlap=200):
-    """Conservative chunking with overlap"""
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
+def chunk_documents(docs: List[Document]) -> List[Document]:
+    """Recommended robust splitter."""
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        add_start_index=True,
         separators=["\n\n", "\n", " ", ""],
     )
-
-    chunks = text_splitter.split_documents(documents)
-    return chunks
+    return splitter.split_documents(docs)
 
 
-def chunk_strategy_2(documents, chunk_size=1500, chunk_overlap=100):
-    """Larger chunks with semantic boundaries"""
-    text_splitter = CharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separator="\n\n",  # Split on paragraphs
-    )
+def get_embeddings():
+    """Choose a single embedding model."""
+    if EMBEDDING_BACKEND == "openai":
+        # Requires OPENAI_API_KEY in env; model defaults to text-embedding-3-large/small
+        from langchain_openai import OpenAIEmbeddings  # local import to avoid unused
 
-    chunks = text_splitter.split_documents(documents)
-    return chunks
-
-
-def create_vector_store(chunks, store_type="chroma", persist_directory="./chroma_db"):
-    """Create and populate vector store"""
-
-    # Initialize embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-
-    if store_type == "chroma":
-        vectorstore = Chroma.from_documents(
-            documents=chunks, embedding=embeddings, persist_directory=persist_directory
+        return OpenAIEmbeddings(model="text-embedding-3-large")  # or -small
+    else:
+        # Fast, strong default
+        return HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-mpnet-base-v2"
         )
-        vectorstore.persist()
-
-    elif store_type == "faiss":
-        vectorstore = FAISS.from_documents(documents=chunks, embedding=embeddings)
-        vectorstore.save_local("./faiss_index")
-
-    return vectorstore
 
 
-def create_rag_chain(vectorstore):
-    """Create RAG chain with citation prompt"""
-
-    # Initialize LLM
-    llm = ChatOpenAI()
-
-    # Custom prompt for citations
-    prompt_template = """
-    Use the following pieces of context to answer the question at the end. 
-    Always include the source page number(s) in your answer using the format [Page X].
-    If you don't know the answer, say that you don't know.
-    
-    Context:
-    {context}
-    
-    Question: {question}
-    
-    Answer with page citations:
+def build_vectorstore(chunks: List[Document], backend: str = "chroma"):
     """
+    Create and populate a vector store using the modern constructors.
+    backend: "chroma" (persistent) or "faiss" (in-memory / savable to disk).
+    """
+    embeddings = get_embeddings()
 
-    prompt = PromptTemplate.from_template(prompt_template)
+    if backend == "chroma":
+        vs = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            collection_name=COLLECTION_NAME,
+            persist_directory=PERSIST_DIR,
+        )
+        # Chroma persists automatically on add; no extra call needed
+        return vs
 
-    # Create retrieval chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
-        chain_type_kwargs={"prompt": prompt},
-        return_source_documents=True,
+    if backend == "faiss":
+        vs = FAISS.from_documents(documents=chunks, embedding=embeddings)
+        # Optionally persist FAISS to disk
+        vs.save_local("./faiss_index")
+        return vs
+
+    raise ValueError("backend must be 'chroma' or 'faiss'")
+
+
+def _format_docs(docs: List[Document]) -> str:
+    """Plain-text context joiner for the prompt."""
+    return "\n\n".join(d.page_content for d in docs)
+
+
+def create_rag_chain(vectorstore) -> Any:
+    """
+    Runnable RAG pipeline that returns BOTH the answer and the retrieved docs.
+    """
+    retriever = vectorstore.as_retriever(
+        search_type="similarity", search_kwargs={"k": 4}
     )
 
-    return qa_chain
+    # Use the community RAG prompt (or your own)
+    prompt = hub.pull("rlm/rag-prompt")
+
+    llm = ChatOpenAI(temperature=0)
+
+    # Simplified approach - build the chain step by step
+    def rag_chain(question: str):
+        # Get relevant documents
+        docs = retriever.invoke(question)
+
+        # Format context
+        context = _format_docs(docs)
+
+        # Create prompt input
+        prompt_input = {"context": context, "question": question}
+
+        # Get response
+        response = (prompt | llm | StrOutputParser()).invoke(prompt_input)
+
+        return {"answer": response, "docs": docs}
+
+    return rag_chain
 
 
-def enhance_answer_with_citations(result):
-    """Add detailed citations to answers"""
-    answer = result["result"]
-    source_docs = result["source_documents"]
-
-    # Extract page numbers from source documents
-    pages = set()
+def enhance_with_citations(answer: str, docs: List[Document]) -> Dict[str, Any]:
+    """Append [Page N] style citations and return structured payload."""
+    pages = []
     sources = []
+    for d in docs:
+        page = d.metadata.get("page", "Unknown")
+        src = d.metadata.get("source_file", "Unknown")
+        pages.append(page)
+        sources.append(f"{src} (Page {page})")
 
-    for doc in source_docs:
-        page_num = doc.metadata.get("page", "Unknown")
-        source_file = doc.metadata.get("source_file", "Unknown")
-        pages.add(page_num)
-        sources.append(f"{source_file} (Page {page_num})")
+    # Add a citation footer if none present
+    if pages and ("[Page" not in answer and "[Pages" not in answer):
+        unique = sorted({str(p) for p in pages})
+        answer = f"{answer} [Pages: {', '.join(unique)}]"
 
-    # Format citations
-    if pages:
-        page_list = sorted(list(pages))
-        citation = f" [Pages: {', '.join(map(str, page_list))}]"
-        if not any(cite in answer for cite in ["[Page", "[Pages"]):
-            answer += citation
-
-    return {"answer": answer, "sources": sources, "source_documents": source_docs}
+    return {"answer": answer, "sources": sorted(set(sources)), "source_documents": docs}
 
 
-# test_qa_pairs.json
-test_questions = [
-    {
-        "question": "What is the main conclusion of the study?",
-        "expected_answer": "The study concludes that...",
-        "expected_pages": [12, 15],
-    },
-    # Add 19 more Q/A pairs
-]
+# -----------------------------------------------------------------------------
+# (Toy) Evaluation utilities
+# -----------------------------------------------------------------------------
+def evaluate_answer_quality(answer: str, expected: str) -> bool:
+    a, e = answer.lower(), expected.lower()
+    common = set(a.split()) & set(e.split())
+    return len(common) / max(1, len(set(e.split()))) > 0.3
 
 
-def evaluate_rag_system(qa_chain, test_questions):
-    """Evaluate RAG system performance"""
-    results = {"accuracy": 0, "citation_coverage": 0, "detailed_results": []}
-
-    correct_answers = 0
-    cited_answers = 0
+def evaluate_rag_system(chain, test_questions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    correct = 0
+    cited = 0
+    detailed = []
 
     for item in test_questions:
-        question = item["question"]
+        q = item["question"]
         expected = item["expected_answer"]
-        expected_pages = item.get("expected_pages", [])
 
-        # Get RAG answer
-        result = qa_chain({"query": question})
-        enhanced_result = enhance_answer_with_citations(result)
-        answer = enhanced_result["answer"]
+        out = chain.invoke(q)  # {"answer": str, "docs": List[Document]}
+        enriched = enhance_with_citations(out["answer"], out["docs"])
 
-        # Check accuracy (simple similarity or exact match)
-        is_correct = evaluate_answer_quality(answer, expected)
-        if is_correct:
-            correct_answers += 1
+        is_correct = evaluate_answer_quality(enriched["answer"], expected)
+        has_cite = "[Page" in enriched["answer"] or "[Pages" in enriched["answer"]
+        correct += int(is_correct)
+        cited += int(has_cite)
 
-        # Check citation presence
-        has_citation = any(page in answer for page in ["[Page", "[Pages"])
-        if has_citation:
-            cited_answers += 1
-
-        results["detailed_results"].append(
+        detailed.append(
             {
-                "question": question,
-                "answer": answer,
+                "question": q,
+                "answer": enriched["answer"],
                 "correct": is_correct,
-                "has_citation": has_citation,
+                "has_citation": has_cite,
+                "sources": enriched["sources"],
             }
         )
 
-    results["accuracy"] = correct_answers / len(test_questions)
-    results["citation_coverage"] = cited_answers / len(test_questions)
-
-    return results
-
-
-def evaluate_answer_quality(answer, expected):
-    """Simple evaluation - can be enhanced with semantic similarity"""
-    # Basic keyword overlap or use sentence transformers for semantic similarity
-    answer_lower = answer.lower()
-    expected_lower = expected.lower()
-
-    # Simple keyword matching (enhance as needed)
-    common_words = set(answer_lower.split()) & set(expected_lower.split())
-    return len(common_words) / len(set(expected_lower.split())) > 0.3
-
-
-def compare_chunking_strategies(pdf_paths, test_questions):
-    """Compare two chunking strategies"""
-    documents = load_pdfs(pdf_paths)
-
-    # Strategy 1
-    chunks_1 = chunk_strategy_1(documents)
-    vectorstore_1 = create_vector_store(chunks_1, persist_directory="./chroma_db_1")
-    qa_chain_1 = create_rag_chain(vectorstore_1)
-    results_1 = evaluate_rag_system(qa_chain_1, test_questions)
-
-    # Strategy 2
-    chunks_2 = chunk_strategy_2(documents)
-    vectorstore_2 = create_vector_store(chunks_2, persist_directory="./chroma_db_2")
-    qa_chain_2 = create_rag_chain(vectorstore_2)
-    results_2 = evaluate_rag_system(qa_chain_2, test_questions)
-
-    # Compare results
-    comparison = {
-        "strategy_1": {
-            "chunks_count": len(chunks_1),
-            "accuracy": results_1["accuracy"],
-            "citation_coverage": results_1["citation_coverage"],
-        },
-        "strategy_2": {
-            "chunks_count": len(chunks_2),
-            "accuracy": results_2["accuracy"],
-            "citation_coverage": results_2["citation_coverage"],
-        },
+    total = max(1, len(test_questions))
+    return {
+        "accuracy": correct / total,
+        "citation_coverage": cited / total,
+        "detailed_results": detailed,
     }
 
-    return comparison
 
-
+# -----------------------------------------------------------------------------
+# Example main
+# -----------------------------------------------------------------------------
 def main():
-    # Configuration
-    pdf_paths = ["document1.pdf", "document2.pdf"]
+    pdf_paths = ["/Users/naveen/Desktop/web/genAi/mongtutorial.pdf"]
 
-    # Load and process documents
-    documents = load_pdfs(pdf_paths)
-    chunks = chunk_strategy_1(documents)  # or strategy_2
+    docs = load_pdfs(pdf_paths)
+    chunks = chunk_documents(docs)
 
-    # Create vector store
-    vectorstore = create_vector_store(chunks)
+    # Pick one: "chroma" (persistent) or "faiss" (local)
+    vectorstore = build_vectorstore(chunks, backend="chroma")
 
-    # Create RAG chain
     qa_chain = create_rag_chain(vectorstore)
 
-    # Interactive querying
+    # Simple REPL
     while True:
-        question = input("Enter your question (or 'quit' to exit): ")
-        if question.lower() == "quit":
+        q = input("Ask a question (or 'quit'): ").strip()
+        if q.lower() == "quit":
             break
 
-        result = qa_chain({"query": question})
-        enhanced_result = enhance_answer_with_citations(result)
-
-        print(f"Answer: {enhanced_result['answer']}")
-        print(f"Sources: {', '.join(enhanced_result['sources'])}")
-        print("-" * 50)
+        try:
+            # Call the chain with the question
+            out = qa_chain(q)  # Now it's a function, not a runnable
+            enriched = enhance_with_citations(out["answer"], out["docs"])
+            print("\nAnswer:", enriched["answer"])
+            print("Sources:", ", ".join(enriched["sources"]))
+            print("-" * 60)
+        except Exception as e:
+            print(f"Error processing question: {e}")
+            print("-" * 60)
 
 
 if __name__ == "__main__":
