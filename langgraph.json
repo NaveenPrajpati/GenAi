@@ -1,0 +1,7 @@
+{
+  "dependencies": [""],
+  "graphs": {
+    "agent": "./practicsProjects/1tool-use.py:graph"
+  },
+  "env": ".env"
+}

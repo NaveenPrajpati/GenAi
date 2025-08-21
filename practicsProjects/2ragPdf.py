@@ -7,6 +7,7 @@ from langchain.chains import RetrievalQA
 from langchain.llms import Ollama  # or OpenAI, etc.
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import CharacterTextSplitter
+from langchain_openai import ChatOpenAI
 
 
 def load_pdfs(pdf_paths):
@@ -72,11 +73,11 @@ def create_vector_store(chunks, store_type="chroma", persist_directory="./chroma
     return vectorstore
 
 
-def create_rag_chain(vectorstore, llm_model="llama2"):
+def create_rag_chain(vectorstore):
     """Create RAG chain with citation prompt"""
 
     # Initialize LLM
-    llm = Ollama(model=llm_model)
+    llm = ChatOpenAI()
 
     # Custom prompt for citations
     prompt_template = """
@@ -92,9 +93,7 @@ def create_rag_chain(vectorstore, llm_model="llama2"):
     Answer with page citations:
     """
 
-    prompt = PromptTemplate(
-        template=prompt_template, input_variables=["context", "question"]
-    )
+    prompt = PromptTemplate.from_template(prompt_template)
 
     # Create retrieval chain
     qa_chain = RetrievalQA.from_chain_type(
