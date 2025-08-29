@@ -2,7 +2,7 @@ node_modules
 .env
 # Ignore virtual environment
 venv/
-
+nn
 # Byte-compiled / cache files
 __pycache__/
 *.py[cod]

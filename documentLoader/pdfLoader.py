@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 llm = ChatOpenAI()
-loader = PyPDFLoader("absolute path to pdf file.pdf")
+loader = PyPDFLoader("/Users/naveen/Desktop/web/genAi/mongtutorial.pdf")
 doc = loader.load()
-# print(doc)
+print(type(doc))
+print(len(doc))
+print(doc[0])
 print(doc[0].page_content)
 print(doc[0].metadata)

@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-llm=ChatOpenAI()
-loader =TextLoader('chatHistory.txt',encoding='utf-8')
-doc=loader.load()
-# print(doc)
+llm = ChatOpenAI()
+loader = TextLoader("chatHistory.txt", encoding="utf-8")
+doc = loader.load()
+print(doc)
 print(doc[0].page_content)
 print(doc[0].metadata)
