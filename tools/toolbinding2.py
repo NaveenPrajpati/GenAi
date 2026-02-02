@@ -1,263 +1,446 @@
 """
-Custom Tool Binding Example in LangChain
-This example demonstrates how to create custom tools and bind them to LLMs
+Advanced Tool Binding - Patterns and Best Practices
+=====================================================
+
+LEARNING OBJECTIVES:
+- Create tools with complex input schemas
+- Build tools that call external APIs
+- Implement tools with logging and callbacks
+- Create composite tools (tools that use other tools)
+- Handle tool errors gracefully
+
+CONCEPT:
+This tutorial covers advanced tool patterns you'll encounter in
+production applications:
+
+ADVANCED PATTERNS:
+    ┌─────────────────────────────────────────────────────────────┐
+    │                  Advanced Tool Patterns                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │                                                              │
+    │  1. Structured Input Tools                                  │
+    │     - Complex Pydantic schemas                              │
+    │     - Nested objects                                        │
+    │     - Optional fields with defaults                         │
+    │                                                              │
+    │  2. API Integration Tools                                   │
+    │     - HTTP requests                                         │
+    │     - Error handling                                        │
+    │     - Rate limiting                                         │
+    │                                                              │
+    │  3. Logging Tools                                           │
+    │     - Audit trails                                          │
+    │     - Performance monitoring                                │
+    │     - Debug output                                          │
+    │                                                              │
+    │  4. Composite Tools                                         │
+    │     - Tools calling tools                                   │
+    │     - Multi-step operations                                 │
+    │     - Workflow orchestration                                │
+    │                                                              │
+    └─────────────────────────────────────────────────────────────┘
+
+PREREQUISITES:
+- Completed: tools/customTools.py, tools/toolbinding.py
+- Understanding of Pydantic models
+- OpenAI API key in .env
+
+NEXT STEPS:
+- langgraph/basicChatbot.py - Tools in a full agent
+- practicsProjects/1tool-use.py - Production tool patterns
 """
 
-from langchain.tools import BaseTool
-from langchain.agents import initialize_agent, AgentType
-from langchain_community.llms import OpenAI
+from langchain_core.tools import tool, BaseTool, StructuredTool
 from langchain_openai import ChatOpenAI
-from langchain.schema import AgentAction, AgentFinish
-from langchain.tools.base import StructuredTool
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
-from typing import Optional, Type
+from typing import Optional, List, Literal
+from datetime import datetime
 from dotenv import load_dotenv
+import json
 import requests
 
-import json
-import math
-
 load_dotenv()
-# Method 1: Creating a custom tool by inheriting from BaseTool
-class CalculatorTool(BaseTool):
-    name = "calculator"
-    description = "Useful for performing mathematical calculations. Input should be a mathematical expression."
-    
-    def _run(self, query: str) -> str:
-        """Execute the calculator tool."""
-        try:
-            # Safe evaluation of mathematical expressions
-            result = eval(query.replace("^", "**"))
-            return f"The result of {query} is {result}"
-        except Exception as e:
-            return f"Error in calculation: {str(e)}"
-    
-    async def _arun(self, query: str) -> str:
-        """Async version of _run method."""
-        return self._run(query)
+
+# =============================================================================
+# PATTERN 1: Complex Pydantic Schemas
+# =============================================================================
 
 
-# Method 2: Using Pydantic models for structured inputs
+class SearchFilters(BaseModel):
+    """Nested schema for search filters."""
+    category: Optional[str] = Field(None, description="Category to filter by")
+    min_price: Optional[float] = Field(None, description="Minimum price")
+    max_price: Optional[float] = Field(None, description="Maximum price")
+    in_stock: bool = Field(True, description="Only show in-stock items")
+
+
+class ProductSearchInput(BaseModel):
+    """Schema for product search with complex nested structure."""
+    query: str = Field(description="The search query string")
+    filters: Optional[SearchFilters] = Field(None, description="Optional search filters")
+    sort_by: Literal["price", "rating", "relevance"] = Field(
+        default="relevance",
+        description="How to sort results"
+    )
+    limit: int = Field(default=10, ge=1, le=100, description="Max results to return")
+
+
+@tool(args_schema=ProductSearchInput)
+def search_products(
+    query: str,
+    filters: Optional[SearchFilters] = None,
+    sort_by: str = "relevance",
+    limit: int = 10
+) -> str:
+    """Search for products in the catalog.
+
+    Use this tool when you need to find products based on a search query.
+    You can optionally filter by category, price range, and stock status.
+    """
+    # Simulated search logic
+    results = {
+        "query": query,
+        "sort_by": sort_by,
+        "limit": limit,
+        "filters_applied": filters.model_dump() if filters else None,
+        "results": [
+            {"name": f"Product {i}", "price": 10.0 * i, "rating": 4.5}
+            for i in range(1, min(limit + 1, 4))
+        ]
+    }
+    return json.dumps(results, indent=2)
+
+
+# =============================================================================
+# PATTERN 2: API Integration Tool
+# =============================================================================
+
+
 class WeatherInput(BaseModel):
-    location: str = Field(description="The city and country, e.g., 'London, UK'")
+    """Input schema for weather lookup."""
+    location: str = Field(description="City and country, e.g., 'London, UK'")
+
 
 class WeatherTool(BaseTool):
-    name = "weather_lookup"
-    description = "Get current weather information for a specific location"
-    args_schema: Type[BaseModel] = WeatherInput
-    
+    """Tool for fetching weather data from an API.
+
+    Demonstrates:
+    - HTTP requests with error handling
+    - Timeout configuration
+    - Response parsing
+    """
+    name: str = "weather_lookup"
+    description: str = "Get current weather information for a specific location"
+    args_schema: type[BaseModel] = WeatherInput
+
+    # Configuration
+    timeout_seconds: int = 5
+
     def _run(self, location: str) -> str:
-        """Get weather for a location (mock implementation)."""
-        # In a real implementation, you'd call a weather API
-        mock_weather_data = {
-            "London, UK": "Cloudy, 18°C",
-            "New York, US": "Sunny, 22°C", 
-            "Tokyo, Japan": "Rainy, 16°C"
+        """Fetch weather for a location (mock implementation)."""
+        # In production, you would call a real API:
+        # try:
+        #     response = requests.get(
+        #         f"https://api.weather.com/v1/current",
+        #         params={"location": location},
+        #         timeout=self.timeout_seconds,
+        #         headers={"User-Agent": "WeatherBot/1.0"}
+        #     )
+        #     response.raise_for_status()
+        #     data = response.json()
+        #     return json.dumps(data)
+        # except requests.exceptions.Timeout:
+        #     return "Error: Weather API request timed out"
+        # except requests.exceptions.RequestException as e:
+        #     return f"Error fetching weather: {str(e)}"
+
+        # Mock implementation
+        mock_data = {
+            "london, uk": {"temp": 18, "condition": "Cloudy", "humidity": 75},
+            "new york, us": {"temp": 22, "condition": "Sunny", "humidity": 45},
+            "tokyo, japan": {"temp": 16, "condition": "Rainy", "humidity": 90},
         }
-        
-        weather = mock_weather_data.get(location, "Weather data not available")
-        return f"Weather in {location}: {weather}"
-    
+
+        location_lower = location.lower()
+        if location_lower in mock_data:
+            data = mock_data[location_lower]
+            return (
+                f"Weather in {location}: {data['condition']}, "
+                f"{data['temp']}°C, Humidity: {data['humidity']}%"
+            )
+        return f"Weather data not available for {location}"
+
     async def _arun(self, location: str) -> str:
+        """Async version - could use aiohttp for true async."""
         return self._run(location)
 
 
-# Method 3: Creating tools using StructuredTool.from_function
-def search_database(query: str, table: str = "users") -> str:
+# =============================================================================
+# PATTERN 3: Logging and Monitoring Tool
+# =============================================================================
+
+
+class LoggingCalculator(BaseTool):
+    """Calculator that logs all operations.
+
+    Demonstrates:
+    - Operation logging
+    - Audit trails
+    - Performance monitoring
     """
-    Search a database table for information.
-    
-    Args:
-        query: The search query
-        table: The table to search in (default: users)
+    name: str = "logging_calculator"
+    description: str = "Perform calculations with full logging"
+
+    # Internal state
+    operation_log: List[dict] = []
+
+    def _run(self, expression: str) -> str:
+        """Execute calculation with logging."""
+        start_time = datetime.now()
+
+        try:
+            # Safe evaluation (in production, use a proper math parser)
+            # NEVER use eval with untrusted input in production!
+            allowed_names = {"abs": abs, "round": round, "min": min, "max": max}
+            result = eval(expression, {"__builtins__": {}}, allowed_names)
+
+            end_time = datetime.now()
+            duration_ms = (end_time - start_time).total_seconds() * 1000
+
+            # Log the operation
+            log_entry = {
+                "timestamp": start_time.isoformat(),
+                "expression": expression,
+                "result": result,
+                "status": "success",
+                "duration_ms": duration_ms
+            }
+            self.operation_log.append(log_entry)
+
+            return f"Result: {result} (logged in {duration_ms:.2f}ms)"
+
+        except Exception as e:
+            # Log errors too
+            log_entry = {
+                "timestamp": start_time.isoformat(),
+                "expression": expression,
+                "error": str(e),
+                "status": "error"
+            }
+            self.operation_log.append(log_entry)
+
+            return f"Calculation error: {str(e)}"
+
+    def get_operation_history(self) -> List[dict]:
+        """Get the full operation log."""
+        return self.operation_log
+
+    async def _arun(self, expression: str) -> str:
+        return self._run(expression)
+
+
+# =============================================================================
+# PATTERN 4: Composite Tool (Tool that uses other tools)
+# =============================================================================
+
+
+class DataAnalysisTool(BaseTool):
+    """Complex tool that combines multiple operations.
+
+    Demonstrates:
+    - Tools calling other tools
+    - Multi-step workflows
+    - Result aggregation
     """
-    # Mock database search
-    mock_results = {
-        "users": {"john": "John Doe, Software Engineer", "jane": "Jane Smith, Data Scientist"},
-        "products": {"laptop": "MacBook Pro, $2000", "phone": "iPhone 14, $999"}
-    }
-    
-    table_data = mock_results.get(table, {})
-    results = [v for k, v in table_data.items() if query.lower() in k.lower()]
-    
-    if results:
-        return f"Found {len(results)} results: {', '.join(results)}"
-    return f"No results found for '{query}' in table '{table}'"
+    name: str = "data_analyzer"
+    description: str = (
+        "Perform complex data analysis by fetching data and calculating statistics. "
+        "Use this for comprehensive analysis tasks."
+    )
 
-# Create the structured tool
-database_tool = StructuredTool.from_function(
-    func=search_database,
-    name="database_search",
-    description="Search database tables for information. Useful for finding user or product data."
-)
+    # Inject dependencies
+    calculator: LoggingCalculator = None
+    weather_tool: WeatherTool = None
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.calculator = LoggingCalculator()
+        self.weather_tool = WeatherTool()
+
+    def _run(self, query: str) -> str:
+        """Perform multi-step analysis."""
+        results = []
+
+        # Example: Query could be "analyze sales with weather correlation"
+        if "weather" in query.lower():
+            # Get weather data for multiple cities
+            cities = ["London, UK", "New York, US", "Tokyo, Japan"]
+            weather_data = []
+
+            for city in cities:
+                weather = self.weather_tool._run(city)
+                weather_data.append(f"  - {weather}")
+
+            results.append("Weather Analysis:")
+            results.extend(weather_data)
+
+        if "calculate" in query.lower() or "average" in query.lower():
+            # Perform some calculations
+            calc_result = self.calculator._run("(10 + 20 + 30) / 3")
+            results.append(f"\nCalculation: {calc_result}")
+
+        if not results:
+            return (
+                "Analysis complete. Specify 'weather' for weather data "
+                "or 'calculate' for numerical analysis."
+            )
+
+        return "\n".join(results)
+
+    async def _arun(self, query: str) -> str:
+        return self._run(query)
 
 
-# Method 4: Custom tool with complex logic and external API calls
+# =============================================================================
+# PATTERN 5: URL Analyzer with Error Handling
+# =============================================================================
+
+
 class URLAnalyzerTool(BaseTool):
-    name = "url_analyzer"
-    description = "Analyze a URL and extract basic information about the webpage"
-    
+    """Analyze a URL and extract information.
+
+    Demonstrates:
+    - Real HTTP requests
+    - Comprehensive error handling
+    - Content parsing
+    """
+    name: str = "url_analyzer"
+    description: str = "Analyze a URL and extract basic information about the webpage"
+
     def _run(self, url: str) -> str:
         """Analyze a URL and return basic information."""
         try:
-            response = requests.get(url, timeout=5, headers={'User-Agent': 'Mozilla/5.0'})
-            
+            response = requests.get(
+                url,
+                timeout=5,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; URLAnalyzer/1.0)"}
+            )
+
             info = {
+                "url": url,
                 "status_code": response.status_code,
                 "content_length": len(response.content),
-                "content_type": response.headers.get('content-type', 'Unknown'),
+                "content_type": response.headers.get("content-type", "Unknown"),
                 "title": "Could not extract title"
             }
-            
-            # Try to extract title
-            if 'text/html' in response.headers.get('content-type', ''):
+
+            # Try to extract title from HTML
+            if "text/html" in response.headers.get("content-type", ""):
                 import re
-                title_match = re.search(r'<title>(.*?)</title>', response.text, re.IGNORECASE)
+                title_match = re.search(
+                    r"<title>(.*?)</title>",
+                    response.text,
+                    re.IGNORECASE | re.DOTALL
+                )
                 if title_match:
-                    info["title"] = title_match.group(1).strip()
-            
+                    info["title"] = title_match.group(1).strip()[:100]
+
             return json.dumps(info, indent=2)
-            
-        except Exception as e:
-            return f"Error analyzing URL: {str(e)}"
-    
+
+        except requests.exceptions.Timeout:
+            return json.dumps({"error": "Request timed out", "url": url})
+        except requests.exceptions.ConnectionError:
+            return json.dumps({"error": "Could not connect to URL", "url": url})
+        except requests.exceptions.RequestException as e:
+            return json.dumps({"error": str(e), "url": url})
+
     async def _arun(self, url: str) -> str:
         return self._run(url)
 
 
-# Method 5: Tool with return_direct=True (returns result directly to user)
-class TimeTool(BaseTool):
-    name = "current_time"
-    description = "Get the current time and date"
-    return_direct = True  # This will return the result directly without further processing
-    
-    def _run(self, query: str = "") -> str:
-        """Get current time."""
-        from datetime import datetime
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return f"Current time: {current_time}"
-    
-    async def _arun(self, query: str = "") -> str:
-        return self._run(query)
-
-
-# Example usage and agent setup
-def main():
-    # Initialize the language model
-    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
-    
-    # Create list of custom tools
-    tools = [
-        CalculatorTool(),
-        WeatherTool(),
-        database_tool,
-        URLAnalyzerTool(),
-        TimeTool()
-    ]
-    
-    # Method 1: Using tools with an agent
-    agent = initialize_agent(
-        tools=tools,
-        llm=llm,
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        verbose=True,
-        handle_parsing_errors=True
-    )
-    
-    # Example queries
-    example_queries = [
-        "What's 25 * 34 + 100?",
-        "What's the weather like in London, UK?",
-        "Search for john in the users table",
-        "What time is it?",
-        "Analyze the URL https://www.example.com"
-    ]
-    
-    print("=== Custom Tool Binding Demo ===\n")
-    
-    for query in example_queries:
-        print(f"Query: {query}")
-        try:
-            result = agent.run(query)
-            print(f"Result: {result}\n")
-        except Exception as e:
-            print(f"Error: {str(e)}\n")
-    
-    # Method 2: Direct tool binding to LLM (for newer versions)
-    # This is useful when you want more control over tool execution
-    print("=== Direct Tool Binding ===\n")
-    
-    # Bind tools directly to the model
-    llm_with_tools = llm.bind_tools(tools)
-    
-    # Example of invoking with tool binding
-    response = llm_with_tools.invoke("Calculate 15 * 20")
-    print(f"Direct binding result: {response}")
-
-
-# Method 6: Custom tool with callbacks and logging
-class LoggingCalculatorTool(BaseTool):
-    name = "logging_calculator"
-    description = "Calculator with logging capabilities"
-    
-    def __init__(self, log_file: str = "calculations.log"):
-        super().__init__()
-        self.log_file = log_file
-    
-    def _run(self, query: str) -> str:
-        """Execute calculation with logging."""
-        try:
-            result = eval(query.replace("^", "**"))
-            
-            # Log the calculation
-            import datetime
-            log_entry = f"{datetime.datetime.now()}: {query} = {result}\n"
-            
-            with open(self.log_file, "a") as f:
-                f.write(log_entry)
-            
-            return f"Calculated: {query} = {result} (logged to {self.log_file})"
-            
-        except Exception as e:
-            return f"Calculation error: {str(e)}"
-    
-    async def _arun(self, query: str) -> str:
-        return self._run(query)
-
-
-# Method 7: Tool that can call other tools (composite tool)
-class DataAnalysisTool(BaseTool):
-    name = "data_analysis"
-    description = "Perform complex data analysis by combining multiple operations"
-    
-    def __init__(self, calculator_tool, database_tool):
-        super().__init__()
-        self.calculator = calculator_tool
-        self.database = database_tool
-    
-    def _run(self, query: str) -> str:
-        """Perform data analysis."""
-        # This is a simple example - in practice, this could be much more complex
-        if "average" in query.lower():
-            # Mock: get some data and calculate average
-            data_points = [10, 20, 30, 40, 50]  # This could come from database_tool
-            average = sum(data_points) / len(data_points)
-            calculation_result = self.calculator._run(f"sum([10,20,30,40,50])/5")
-            
-            return f"Data analysis result: Average = {average}. Calculator verification: {calculation_result}"
-        
-        return "Data analysis complete - please specify what type of analysis you need"
-    
-    async def _arun(self, query: str) -> str:
-        return self._run(query)
-
-
+# =============================================================================
+# DEMO: Using Advanced Tools with LLM
+# =============================================================================
 if __name__ == "__main__":
-    # Note: You'll need to set your OpenAI API key as an environment variable
-    # export OPENAI_API_KEY="your-api-key-here"
-    
-    print("Custom Tool Binding Example")
-    print("Make sure to set your OPENAI_API_KEY environment variable before running")
-    
-    # Uncomment the line below to run the main demo
-    # main()
+    print("=" * 70)
+    print("ADVANCED TOOL BINDING DEMO")
+    print("=" * 70)
+
+    # Initialize tools
+    weather_tool = WeatherTool()
+    logging_calc = LoggingCalculator()
+    data_analyzer = DataAnalysisTool()
+    url_analyzer = URLAnalyzerTool()
+
+    # Create list of tools
+    tools = [
+        search_products,
+        weather_tool,
+        logging_calc,
+        data_analyzer,
+        url_analyzer
+    ]
+
+    # Bind to LLM
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm_with_tools = llm.bind_tools(tools)
+
+    # Test queries
+    test_queries = [
+        "Search for laptops under $1000",
+        "What's the weather in Tokyo, Japan?",
+        "Calculate 15 * 23 + 100",
+        "Analyze the weather patterns across major cities",
+    ]
+
+    for query in test_queries:
+        print(f"\n{'='*70}")
+        print(f"Query: {query}")
+        print("-" * 70)
+
+        response = llm_with_tools.invoke(query)
+
+        if response.tool_calls:
+            for tc in response.tool_calls:
+                print(f"Tool: {tc['name']}")
+                print(f"Args: {json.dumps(tc['args'], indent=2)}")
+
+                # Execute the tool
+                tool_map = {
+                    "search_products": search_products,
+                    "weather_lookup": weather_tool,
+                    "logging_calculator": logging_calc,
+                    "data_analyzer": data_analyzer,
+                    "url_analyzer": url_analyzer
+                }
+
+                if tc["name"] in tool_map:
+                    result = tool_map[tc["name"]].invoke(tc["args"])
+                    print(f"Result: {result}")
+        else:
+            print(f"LLM Response: {response.content}")
+
+    # Show operation history from logging calculator
+    print("\n" + "=" * 70)
+    print("LOGGING CALCULATOR HISTORY")
+    print("=" * 70)
+    for entry in logging_calc.get_operation_history():
+        print(f"  {entry['timestamp']}: {entry.get('expression', 'N/A')} "
+              f"= {entry.get('result', entry.get('error', 'N/A'))}")
+
+    print("\n" + "=" * 70)
+    print("BEST PRACTICES FOR PRODUCTION TOOLS")
+    print("=" * 70)
+    print("""
+    1. ALWAYS validate input with Pydantic schemas
+    2. Use timeouts for external API calls
+    3. Implement comprehensive error handling
+    4. Log all operations for debugging and auditing
+    5. Keep tools focused - one responsibility per tool
+    6. Document all possible error conditions
+    7. Consider rate limiting for expensive operations
+    8. Use async when dealing with I/O operations
+    9. Never use eval() with untrusted input
+    10. Return structured data (JSON) for complex results
+    """)

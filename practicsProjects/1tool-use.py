@@ -1,3 +1,57 @@
+"""
+Tool Use Agent with Guardrails
+===============================
+
+LEARNING OBJECTIVES:
+- Build a production-ready tool-using agent
+- Implement input guardrails for safety
+- Use safe mathematical evaluation (no eval!)
+- Handle tool routing and error cases
+
+CONCEPT:
+This agent demonstrates:
+1. Custom tool creation with @tool decorator
+2. Input validation and guardrails
+3. Safe expression evaluation using AST
+4. Conditional routing based on input analysis
+
+ARCHITECTURE:
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    Tool Agent Flow                           │
+    ├─────────────────────────────────────────────────────────────┤
+    │                                                              │
+    │   User Input                                                │
+    │        │                                                    │
+    │        ▼                                                    │
+    │   ┌──────────────┐                                         │
+    │   │  Guardrails  │ ──► Block dangerous requests            │
+    │   └──────┬───────┘                                         │
+    │          │                                                  │
+    │          ▼                                                  │
+    │   ┌──────────────┐                                         │
+    │   │ Analyze Tool │ ──► Detect which tool is needed         │
+    │   └──────┬───────┘                                         │
+    │          │                                                  │
+    │    ┌─────┴─────┬───────────────┐                           │
+    │    ▼           ▼               ▼                            │
+    │ Calculator  Dictionary    DateTime                          │
+    │    │           │               │                            │
+    │    └─────┬─────┴───────────────┘                           │
+    │          ▼                                                  │
+    │      Response                                               │
+    │                                                              │
+    └─────────────────────────────────────────────────────────────┘
+
+PREREQUISITES:
+- Completed: tools/customTools.py, tools/toolbinding.py
+- Understanding of LangGraph StateGraph
+- OpenAI API key in .env
+
+NEXT STEPS:
+- practicsProjects/2ragPdf.py - RAG pipeline
+- practicsProjects/6multiAgent.py - Multi-agent systems
+"""
+
 from __future__ import annotations
 from typing import Annotated, TypedDict, List, Optional
 from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
@@ -5,9 +59,12 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import ToolNode, tools_condition
-import math, re
+import ast
+import operator
+import math
+import re
 from IPython.display import Image, display
 from dotenv import load_dotenv
 
@@ -15,15 +72,111 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# --- tools ---
+# =============================================================================
+# SAFE MATH EVALUATOR (No eval()!)
+# =============================================================================
+class SafeMathEvaluator:
+    """
+    Safely evaluate mathematical expressions using AST parsing.
+    This is MUCH safer than eval() as it only allows specific operations.
+    """
+
+    # Allowed operators
+    OPERATORS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+        ast.Mod: operator.mod,
+        ast.FloorDiv: operator.floordiv,
+    }
+
+    # Allowed functions
+    FUNCTIONS = {
+        'sqrt': math.sqrt,
+        'sin': math.sin,
+        'cos': math.cos,
+        'tan': math.tan,
+        'log': math.log,
+        'log10': math.log10,
+        'abs': abs,
+        'round': round,
+        'floor': math.floor,
+        'ceil': math.ceil,
+    }
+
+    # Allowed constants
+    CONSTANTS = {
+        'pi': math.pi,
+        'e': math.e,
+    }
+
+    def evaluate(self, expression: str) -> float:
+        """Safely evaluate a mathematical expression."""
+        try:
+            tree = ast.parse(expression, mode='eval')
+            return self._eval_node(tree.body)
+        except Exception as e:
+            raise ValueError(f"Invalid expression: {e}")
+
+    def _eval_node(self, node):
+        """Recursively evaluate AST nodes."""
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError(f"Invalid constant: {node.value}")
+
+        elif isinstance(node, ast.Name):
+            if node.id in self.CONSTANTS:
+                return self.CONSTANTS[node.id]
+            raise ValueError(f"Unknown variable: {node.id}")
+
+        elif isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in self.OPERATORS:
+                raise ValueError(f"Unsupported operator: {op_type}")
+            left = self._eval_node(node.left)
+            right = self._eval_node(node.right)
+            return self.OPERATORS[op_type](left, right)
+
+        elif isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in self.OPERATORS:
+                raise ValueError(f"Unsupported operator: {op_type}")
+            operand = self._eval_node(node.operand)
+            return self.OPERATORS[op_type](operand)
+
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                func_name = node.func.id
+                if func_name in self.FUNCTIONS:
+                    args = [self._eval_node(arg) for arg in node.args]
+                    return self.FUNCTIONS[func_name](*args)
+            raise ValueError(f"Unknown function: {node.func}")
+
+        else:
+            raise ValueError(f"Unsupported node type: {type(node)}")
+
+
+# Create global evaluator instance
+safe_eval = SafeMathEvaluator()
+
+
+# =============================================================================
+# TOOLS
+# =============================================================================
 @tool
 def calculator(expression: str) -> str:
-    """Evaluate a simple arithmetic expression like '17% of 350' or '2+2'."""
+    """Evaluate a simple arithmetic expression like '17% of 350' or '2+2'.
 
+    Supports: +, -, *, /, **, %, sqrt, sin, cos, tan, log, pi, e
+    """
     try:
-        # Handle percentage operations
+        # Handle percentage operations specially
         if "of" in expression and "%" in expression:
-            # Parse "X% of Y" format
             match = re.match(
                 r"(\d+(?:\.\d+)?)%\s+of\s+(\d+(?:\.\d+)?)", expression.strip()
             )
@@ -33,18 +186,8 @@ def calculator(expression: str) -> str:
                 result = (percentage / 100) * value
                 return f"{expression} = {result}"
 
-        # Handle other mathematical expressions
-        # Replace common math functions
-        expression = expression.replace("sqrt", '__import__("math").sqrt')
-        expression = expression.replace("sin", '__import__("math").sin')
-        expression = expression.replace("cos", '__import__("math").cos')
-        expression = expression.replace("tan", '__import__("math").tan')
-        expression = expression.replace("log", '__import__("math").log')
-        expression = expression.replace("pi", '__import__("math").pi')
-        expression = expression.replace("e", '__import__("math").e')
-
-        # Evaluate the expression safely
-        result = eval(expression, {"__builtins__": {}}, {})
+        # Use safe evaluator for all other expressions
+        result = safe_eval.evaluate(expression)
         return f"{expression} = {result}"
 
     except Exception as e:
@@ -350,7 +493,7 @@ graph.add_edge("call_tools", END)
 graph.add_edge("handle_guardrail_violation", END)
 graph.add_edge("general_response", END)
 
-app = graph.compile(checkpointer=MemorySaver())
+app = graph.compile(checkpointer=InMemorySaver())
 # app.get_graph().draw_png("langgraph.png")
 
 try:
